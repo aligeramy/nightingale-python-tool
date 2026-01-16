@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  python-tool:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHON_API_KEY=${PYTHON_API_KEY:-dev-key-change-me}
+      - EXECUTION_TIMEOUT=30
+      - MAX_MEMORY_MB=512
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1'
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M,mode=1777
