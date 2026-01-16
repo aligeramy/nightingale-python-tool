@@ -1,6 +1,7 @@
 """Sandboxed Python code execution using RestrictedPython."""
 
 import io
+import re
 import sys
 import signal
 from contextlib import contextmanager
@@ -106,6 +107,77 @@ def get_safe_globals() -> dict[str, Any]:
     return safe_globals
 
 
+def strip_imports(code: str) -> str:
+    """
+    Remove all import statements from Python code.
+    
+    Handles:
+    - import x
+    - import x as y
+    - from x import y
+    - from x import y as z
+    - Multi-line imports (with parentheses)
+    - Comments after imports
+    
+    Args:
+        code: Python code string
+        
+    Returns:
+        Code string with all import statements removed
+    """
+    lines = code.split('\n')
+    cleaned_lines = []
+    in_multiline_import = False
+    paren_count = 0
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Skip empty lines that were part of imports
+        if not stripped:
+            if not in_multiline_import:
+                cleaned_lines.append(line)
+            continue
+        
+        # Check if this is an import statement
+        is_import = stripped.startswith('import ') or stripped.startswith('from ')
+        
+        if is_import:
+            # Check for multi-line import (has opening parenthesis)
+            if '(' in stripped:
+                in_multiline_import = True
+                paren_count = stripped.count('(') - stripped.count(')')
+                # Skip this line
+                continue
+            else:
+                # Single-line import, skip it
+                continue
+        
+        # Handle multi-line import continuation
+        if in_multiline_import:
+            paren_count += stripped.count('(') - stripped.count(')')
+            # Check if this line ends the multi-line import
+            if paren_count <= 0 and ')' in stripped:
+                in_multiline_import = False
+                paren_count = 0
+            # Skip this line
+            continue
+        
+        # Regular code line, keep it
+        cleaned_lines.append(line)
+    
+    # Join lines back together
+    cleaned_code = '\n'.join(cleaned_lines)
+    
+    # Clean up multiple consecutive blank lines (max 2 consecutive)
+    cleaned_code = re.sub(r'\n{3,}', '\n\n', cleaned_code)
+    
+    # Remove leading blank lines
+    cleaned_code = cleaned_code.lstrip('\n')
+    
+    return cleaned_code
+
+
 def validate_code(code: str) -> tuple[bool, str | None]:
     """Validate code for forbidden patterns."""
     # Check for forbidden imports
@@ -138,7 +210,11 @@ def execute_code(code: str, timeout: int | None = None) -> dict[str, Any]:
     """
     timeout = timeout or settings.execution_timeout
 
-    # Validate code first
+    # Strip import statements before validation/execution
+    # This allows LLM-generated code with imports to work automatically
+    code = strip_imports(code)
+
+    # Validate code after stripping imports
     is_valid, error_msg = validate_code(code)
     if not is_valid:
         return {
